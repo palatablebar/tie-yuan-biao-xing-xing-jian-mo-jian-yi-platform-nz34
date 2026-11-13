@@ -1,0 +1,49 @@
+/* 设计令牌 · 制图台：深色底板的描图纸 + 黄铜刻线 + 手绘网格。
+   规则：oklch() 色板；无纯黑纯白；双字体（display=赵体标题 / body=Spectral 衬线）；模块化字号。 */
+:root {
+  --board: oklch(0.235 0.014 252);
+  --board-2: oklch(0.272 0.016 250);
+  --board-3: oklch(0.308 0.018 248);
+  --board-4: oklch(0.352 0.02 246);
+
+  --paper: oklch(0.925 0.012 92);
+  --paper-2: oklch(0.868 0.016 90);
+  --ink: oklch(0.935 0.012 92);
+  --ink-soft: oklch(0.792 0.016 92);
+  --ink-faint: oklch(0.642 0.018 94);
+
+  --rule: oklch(0.398 0.022 248);
+  --rule-strong: oklch(0.512 0.03 246);
+  --grid: oklch(0.44 0.02 250 / 0.34);
+
+  --brass: oklch(0.788 0.118 84);
+  --brass-soft: oklch(0.668 0.094 82);
+  --brass-deep: oklch(0.52 0.08 78);
+  --brass-wash: oklch(0.352 0.048 82);
+
+  --ok: oklch(0.752 0.092 166);
+  --ok-wash: oklch(0.322 0.038 166);
+  --warn: oklch(0.812 0.104 72);
+  --warn-wash: oklch(0.352 0.052 72);
+  --danger: oklch(0.702 0.142 32);
+  --danger-wash: oklch(0.338 0.062 30);
+  --info: oklch(0.742 0.072 232);
+  --info-wash: oklch(0.33 0.032 232);
+
+  --font-display: 'ZCOOL QingKe HuangYou', 'Songti SC', 'STSong', serif;
+  --font-body: 'Spectral', 'Noto Serif SC', 'Songti SC', serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', ui-monospace, monospace;
+
+  --fs-xs: 0.72rem;
+  --fs-sm: 0.83rem;
+  --fs-md: 0.95rem;
+  --fs-lg: 1.2rem;
+  --fs-xl: clamp(1.55rem, 2.3vw, 2.25rem);
+  --fs-2xl: clamp(2.1rem, 3.6vw, 3.4rem);
+
+  --pad: clamp(14px, 1.6vw, 28px);
+  --rail: 232px;
+  --radius: 2px;
+  --shadow: 0 1px 0 oklch(0.44 0.02 250 / 0.5), 0 24px 48px -38px oklch(0.12 0.02 250 / 0.9);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
