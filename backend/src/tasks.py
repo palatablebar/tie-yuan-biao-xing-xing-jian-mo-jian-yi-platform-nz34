@@ -28,7 +28,7 @@ def heartbeat() -> str:
 
 @celery_app.task(name=TASK_DAILY)
 def daily_refresh() -> dict:
-    """每天 07:40 对全部贴源表重跑一次剖析 + 关系发现 + 建模建议。"""
+    """每天 07:40 重跑剖析，产出一个待核对的分析版本（草案）；不自动发布，正式版保持不变。"""
     from src.config.database import session_scope
     from src.services import audit_service, model_run_service
 
@@ -45,10 +45,16 @@ def daily_refresh() -> dict:
             detail={
                 "trigger": "schedule",
                 "run_no": run.run_no,
+                "version_id": run.version_id,
                 "relations": run.relation_count,
                 "suggestions": run.suggestion_count,
             },
             layer="worker",
         )
-    logger.info("daily profiling finished: run=%s relations=%s", run.run_no, run.relation_count)
-    return {"run_no": run.run_no, "relations": run.relation_count}
+    logger.info(
+        "daily profiling finished: run=%s version=%s relations=%s",
+        run.run_no,
+        run.version_id,
+        run.relation_count,
+    )
+    return {"run_no": run.run_no, "version_id": run.version_id, "relations": run.relation_count}

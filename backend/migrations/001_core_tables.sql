@@ -1,4 +1,5 @@
 -- 核心表结构参考（运行时由 SQLAlchemy create_all 建表；本文件仅供 reviewer 对照字段）
+-- 版本化模型：剖析 / 关系 / 建议全部归属 analysis_versions，草案与正式版快照隔离。
 
 CREATE TABLE users (
     id              SERIAL PRIMARY KEY,
@@ -25,8 +26,34 @@ CREATE TABLE source_tables (
     updated_at      TIMESTAMP    NOT NULL
 );
 
+CREATE TABLE analysis_versions (
+    id                  SERIAL PRIMARY KEY,
+    version_no          VARCHAR(40)  NOT NULL UNIQUE,
+    run_id              INTEGER REFERENCES model_runs(id) ON DELETE SET NULL,
+    status              VARCHAR(20)  NOT NULL DEFAULT 'draft',
+    trigger             VARCHAR(20)  NOT NULL DEFAULT 'manual',
+    operator_email      VARCHAR(160) NOT NULL,
+    base_version_id     INTEGER REFERENCES analysis_versions(id) ON DELETE SET NULL,
+    parent_version_id   INTEGER REFERENCES analysis_versions(id) ON DELETE SET NULL,
+    affected_table_ids  JSON         NOT NULL DEFAULT '[]',
+    input_fingerprint   VARCHAR(64),
+    table_count         INTEGER      NOT NULL DEFAULT 0,
+    profile_count       INTEGER      NOT NULL DEFAULT 0,
+    relation_count      INTEGER      NOT NULL DEFAULT 0,
+    suggestion_count    INTEGER      NOT NULL DEFAULT 0,
+    validation          JSON         NOT NULL DEFAULT '{}',
+    diff_summary        JSON         NOT NULL DEFAULT '{}',
+    metrics             JSON         NOT NULL DEFAULT '{}',
+    log_text            TEXT,
+    published_by        VARCHAR(160),
+    published_at        TIMESTAMP,
+    created_at          TIMESTAMP    NOT NULL,
+    updated_at          TIMESTAMP    NOT NULL
+);
+
 CREATE TABLE column_profiles (
     id              SERIAL PRIMARY KEY,
+    version_id      INTEGER      NOT NULL REFERENCES analysis_versions(id) ON DELETE CASCADE,
     table_id        INTEGER      NOT NULL REFERENCES source_tables(id) ON DELETE CASCADE,
     column_name     VARCHAR(80)  NOT NULL,
     dtype           VARCHAR(16)  NOT NULL,
@@ -37,11 +64,12 @@ CREATE TABLE column_profiles (
     sample_size     INTEGER      NOT NULL DEFAULT 0,
     created_at      TIMESTAMP    NOT NULL,
     updated_at      TIMESTAMP    NOT NULL,
-    CONSTRAINT uq_profiles_table_column UNIQUE (table_id, column_name)
+    CONSTRAINT uq_profiles_version_table_column UNIQUE (version_id, table_id, column_name)
 );
 
 CREATE TABLE relations (
     id              SERIAL PRIMARY KEY,
+    version_id      INTEGER      NOT NULL REFERENCES analysis_versions(id) ON DELETE CASCADE,
     left_table_id   INTEGER      NOT NULL REFERENCES source_tables(id) ON DELETE CASCADE,
     left_column     VARCHAR(80)  NOT NULL,
     right_table_id  INTEGER      NOT NULL REFERENCES source_tables(id) ON DELETE CASCADE,
@@ -51,7 +79,9 @@ CREATE TABLE relations (
     kind            VARCHAR(12)  NOT NULL,
     sample_size     INTEGER      NOT NULL DEFAULT 0,
     created_at      TIMESTAMP    NOT NULL,
-    CONSTRAINT uq_relations_edge UNIQUE (left_table_id, left_column, right_table_id, right_column)
+    CONSTRAINT uq_relations_version_edge UNIQUE (
+        version_id, left_table_id, left_column, right_table_id, right_column
+    )
 );
 
 CREATE TABLE model_runs (
@@ -64,6 +94,7 @@ CREATE TABLE model_runs (
     profile_count    INTEGER      NOT NULL DEFAULT 0,
     relation_count   INTEGER      NOT NULL DEFAULT 0,
     suggestion_count INTEGER      NOT NULL DEFAULT 0,
+    version_id       INTEGER,
     metrics          JSON,
     log_text         TEXT,
     seed_key         VARCHAR(120) UNIQUE,
@@ -71,9 +102,22 @@ CREATE TABLE model_runs (
     finished_at      TIMESTAMP
 );
 
+CREATE TABLE suggestion_decisions (
+    id              SERIAL PRIMARY KEY,
+    table_id        INTEGER      NOT NULL REFERENCES source_tables(id) ON DELETE CASCADE,
+    version_id      INTEGER      NOT NULL REFERENCES analysis_versions(id) ON DELETE CASCADE,
+    target_name     VARCHAR(80)  NOT NULL DEFAULT '',
+    decision        VARCHAR(16)  NOT NULL,
+    source          VARCHAR(12)  NOT NULL DEFAULT 'manual',
+    decided_by      VARCHAR(160) NOT NULL,
+    note            VARCHAR(500),
+    created_at      TIMESTAMP    NOT NULL,
+    CONSTRAINT uq_decision_version_table UNIQUE (version_id, table_id)
+);
+
 CREATE TABLE model_suggestions (
     id              SERIAL PRIMARY KEY,
-    run_id          INTEGER      NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
+    version_id      INTEGER      NOT NULL REFERENCES analysis_versions(id) ON DELETE CASCADE,
     table_id        INTEGER      NOT NULL REFERENCES source_tables(id) ON DELETE CASCADE,
     target_name     VARCHAR(80)  NOT NULL,
     role            VARCHAR(8)   NOT NULL,
@@ -85,11 +129,13 @@ CREATE TABLE model_suggestions (
     status          VARCHAR(16)  NOT NULL DEFAULT 'pending',
     ddl             TEXT,
     reason          TEXT,
+    change_kind     VARCHAR(12)  NOT NULL DEFAULT 'unchanged',
+    evidence        JSON         NOT NULL DEFAULT '{}',
     adopted_by      VARCHAR(160),
     adopted_at      TIMESTAMP,
     created_at      TIMESTAMP    NOT NULL,
     updated_at      TIMESTAMP    NOT NULL,
-    CONSTRAINT uq_suggestions_run_table UNIQUE (run_id, table_id)
+    CONSTRAINT uq_suggestions_version_table UNIQUE (version_id, table_id)
 );
 
 CREATE TABLE audit_logs (

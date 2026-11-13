@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { ENUMS, can, roleTone, statusTone } from '../config.js';
+import { ENUMS, can, changeTone, roleTone, statusTone, versionTone } from '../config.js';
 import { confidenceBar, drawer, errorBox, errorMessage, esc, field, kv, table, toast } from '../ui.js';
 
 const state = { role: '', status: '', q: '' };
@@ -20,16 +20,42 @@ function joinsTable(joins) {
       .join('')}</tbody></table></div>`;
 }
 
+function evidenceList(evidence) {
+  if (!evidence || !Object.keys(evidence).length) return '<p class="muted">无额外量化依据。</p>';
+  const labels = {
+    grain_columns: '粒度外键',
+    grain_combos: '抽样去重组合数',
+    sampled_rows: '抽样行数',
+    measure_columns: '度量列',
+    avg_containment: '平均包含度',
+    edge_containments: '各边包含度',
+    fact_score: '事实判定分',
+    candidate_key: '候选键',
+    descriptive_columns: '描述列',
+    incoming_fact_edges: '被事实表引用边数',
+    outgoing_edges: '出边数',
+    dim_score: '维度判定分',
+    row_count: '源表行数',
+  };
+  return `<dl class="kv">${Object.entries(evidence)
+    .map(([key, value]) => {
+      const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+      return `<dt>${esc(labels[key] || key)}</dt><dd class="mono">${esc(text)}</dd>`;
+    })
+    .join('')}</dl>`;
+}
+
 function openSuggestion(view, ctx, item) {
   const adoptable = can(ctx.user.role, 'suggestion:adopt') && item.status === 'pending';
   const dismissable = can(ctx.user.role, 'suggestion:review') && item.status !== 'adopted';
   const { root, close } = drawer({
     title: `${item.target_name}`,
-    subtitle: `${item.table_name} → ${item.role_label} · ${item.status_label}`,
+    subtitle: `${item.table_name} → ${item.role_label} · ${item.status_label} · ${item.version_no || ''}`,
     body: `${kv([
       ['目标表', `<span class="mono">${esc(item.target_name)}</span>`],
       ['源表', `<span class="mono">${esc(item.table_name)}</span>`],
       ['角色', `<span class="badge ${roleTone(item.role)}">${esc(item.role_label)}</span>`],
+      ['版本差异', `<span class="badge ${changeTone(item.change_kind)}">${esc(ENUMS.changeKind[item.change_kind] || item.change_kind || '无变化')}</span>`],
       ['粒度', esc(item.grain)],
       ['置信度', confidenceBar(item.confidence)],
       ['状态', `<span class="badge ${statusTone(item.status)}">${esc(item.status_label)}</span>`],
@@ -38,13 +64,15 @@ function openSuggestion(view, ctx, item) {
       ['采纳人', esc(item.adopted_by || '—')],
       ['判定依据', esc(item.reason)],
     ])}
+    <h3>本版依据（量化口径）</h3>
+    ${evidenceList(item.evidence)}
     <h3>关联边</h3>
     ${joinsTable(item.joins)}
     <h3>CREATE TABLE DDL（后端生成）</h3>
     <pre class="code">${esc(item.ddl)}</pre>`,
     footer: `${adoptable ? '<button class="btn accent" id="adopt-btn">采纳这条建议</button>' : ''}
       ${dismissable ? '<button class="btn ghost" id="dismiss-btn" style="margin-left:8px">驳回</button>' : ''}
-      ${!adoptable && !dismissable ? '<span class="mono muted">当前角色无采纳/驳回权限，或该建议已定稿。</span>' : ''}`,
+      ${!adoptable && !dismissable ? '<span class="mono muted">当前角色无采纳/驳回权限，或该版本为只读正式版（请在草案上决定）。</span>' : ''}`,
   });
   root.querySelector('#adopt-btn')?.addEventListener('click', async () => {
     try {
@@ -82,16 +110,29 @@ export const suggestionsPage = {
       view.querySelector('#retry-btn')?.addEventListener('click', () => suggestionsPage.render(view, ctx));
       return;
     }
+    const scope = overview.scope_version;
+    const draft = overview.draft_version;
+    const isDraftScope = data.version_status === 'draft' || data.version_status === 'validation_failed';
     view.innerHTML = `
       <section class="panel">
         <div class="panel-head">
           <h2>星型建模建议</h2>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <span class="meta">${data.total} 条 · 4 事实 / 5 主维 · 7 张二级维不单独建议</span>
-            ${can(ctx.user.role, 'run:create') ? '<button class="btn sm ghost" id="rerun">重新剖析</button>' : ''}
+            <span class="meta">${data.total} 条 · 口径版本
+              <b class="mono">${esc(data.version_no || '—')}</b>
+              <span class="badge ${versionTone(data.version_status || '')}">${esc(ENUMS.versionStatus[data.version_status] || '—')}</span>
+            </span>
             ${can(ctx.user.role, 'export:read') ? '<button class="btn sm accent" id="export-ddl" data-testid="export-ddl">导出 DDL</button>' : ''}
           </div>
         </div>
+        ${
+          draft && !isDraftScope
+            ? `<div class="panel-body"><div class="draft-banner" id="draft-banner">
+                 <span>有待核对草案 <b class="mono">${esc(draft.version_no)}</b>（${esc(draft.status_label)}）：采纳/驳回请在草案上操作，发布后才进入正式版。</span>
+                 <button class="btn sm ghost" id="go-versions">去版本页核对/发布</button>
+               </div></div>`
+            : ''
+        }
         <div class="panel-body">
           <div class="filter-bar" id="suggestion-filters">
             ${field({ label: '搜索', name: 'q', value: state.q, placeholder: '目标表 / 粒度' })}
@@ -107,6 +148,7 @@ export const suggestionsPage = {
           columns: [
             { key: 'target_name', label: '目标表', render: (row) => `<b class="mono">${esc(row.target_name)}</b><div class="mono muted">${esc(row.table_name)}</div>` },
             { key: 'role', label: '角色', render: (row) => `<span class="badge ${roleTone(row.role)}">${esc(row.role_label)}</span>` },
+            { key: 'change_kind', label: '差异', render: (row) => `<span class="badge ${changeTone(row.change_kind)}">${esc(ENUMS.changeKind[row.change_kind] || row.change_kind || '无变化')}</span>` },
             { key: 'grain', label: '粒度', render: (row) => `<span>${esc(row.grain)}</span>` },
             { key: 'joins', label: '关联', className: 'num', render: (row) => (row.joins || []).length },
             { key: 'confidence', label: '置信度', render: (row) => confidenceBar(row.confidence) },
@@ -115,7 +157,7 @@ export const suggestionsPage = {
           ],
         })}
       </section>
-      <p class="mono muted">建议与 DDL 全部由后端算法生成并落库；采纳只改状态，不改算法结论。导出 SQL 共 9 段，每段一条建议。</p>`;
+      <p class="mono muted">建议与 DDL 全部由后端算法生成并按分析版本落库；人工决定跟随业务对象迁移，重跑/补数不重置。导出 SQL 仅包含当前正式版，每段一条建议。</p>`;
 
     const filters = view.querySelector('#suggestion-filters');
     filters?.addEventListener('change', () => {
@@ -139,24 +181,13 @@ export const suggestionsPage = {
     view.querySelector('#export-ddl')?.addEventListener('click', async () => {
       try {
         await api.download('/api/exports/ddl.sql', 'starmodel-ddl.sql');
-        toast('已开始下载 DDL（9 段）');
+        toast('已开始下载正式版 DDL');
       } catch (err) {
         toast(errorMessage(err), 'err');
       }
     });
-    view.querySelector('#rerun')?.addEventListener('click', async (event) => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      button.textContent = '剖析中…';
-      try {
-        const run = await api.post('/api/model-runs', { trigger: 'manual' });
-        toast(`重新剖析完成：${run.suggestion_count} 条建议`);
-        await suggestionsPage.render(view, ctx);
-      } catch (err) {
-        toast(errorMessage(err), 'err');
-        button.disabled = false;
-        button.textContent = '重新剖析';
-      }
+    view.querySelector('#go-versions')?.addEventListener('click', () => {
+      location.hash = '#/versions';
     });
   },
 };

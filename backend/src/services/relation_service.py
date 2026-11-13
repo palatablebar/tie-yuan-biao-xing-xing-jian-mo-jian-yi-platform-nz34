@@ -1,15 +1,28 @@
-"""关系查询 + 关系图节点（角色由算法 B 的判定函数现算，不落库）。"""
+"""关系查询 + 关系图节点。
+
+数据范围默认锁定「当前正式版」分析版本：草案未发布前不影响关系图，
+避免补数重跑后页面混入上一版或未核对的边。scope=draft 时可预览当前草案。
+角色仍由算法 B 的判定函数现算（输入为该版本快照），不落库、不由前端推断。
+"""
 from __future__ import annotations
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.constants.enums import RELATION_KIND_LABELS
+from src.models.analysis_version import AnalysisVersion
 from src.models.column_profile import ColumnProfile
 from src.models.relation import Relation
 from src.models.source_table import SourceTable
+from src.services import analysis_version_service as version_service
 from src.services.source_table_service import serialize_profile
 from src.services.star_service import ROLE_DIM, ROLE_FACT, classify_tables
+
+
+def _scope_version(db: Session, scope: str | None) -> AnalysisVersion | None:
+    if scope == "draft":
+        return version_service.current_draft(db)
+    return version_service.current_published(db) or version_service.current_draft(db)
 
 
 def _table_dict(table: SourceTable) -> dict:
@@ -36,9 +49,13 @@ def _profile_dict(profile: ColumnProfile) -> dict:
     }
 
 
-def list_relations(db: Session, *, kind: str | None = None, limit: int = 60, offset: int = 0) -> dict:
+def list_relations(db: Session, *, kind: str | None = None, scope: str | None = None, limit: int = 60, offset: int = 0) -> dict:
+    version = _scope_version(db, scope)
     stmt = select(Relation)
     count_stmt = select(func.count()).select_from(Relation)
+    if version is not None:
+        stmt = stmt.where(Relation.version_id == version.id)
+        count_stmt = count_stmt.where(Relation.version_id == version.id)
     if kind:
         stmt = stmt.where(Relation.kind == kind)
         count_stmt = count_stmt.where(Relation.kind == kind)
@@ -65,15 +82,30 @@ def list_relations(db: Session, *, kind: str | None = None, limit: int = 60, off
                 "sample_size": row.sample_size,
             }
         )
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "version_id": version.id if version else None,
+        "version_no": version.version_no if version else None,
+        "version_status": version.status if version else None,
+    }
 
 
-def graph(db: Session) -> dict:
+def graph(db: Session, *, scope: str | None = None) -> dict:
+    version = _scope_version(db, scope)
     tables = db.scalars(select(SourceTable).order_by(SourceTable.id)).all()
-    relations = db.scalars(select(Relation).order_by(Relation.id)).all()
-    profiles = db.scalars(select(ColumnProfile)).all()
+    relation_rows = (
+        db.scalars(select(Relation).where(Relation.version_id == version.id).order_by(Relation.id)).all()
+        if version
+        else []
+    )
+    profile_rows = (
+        db.scalars(select(ColumnProfile).where(ColumnProfile.version_id == version.id)).all() if version else []
+    )
     table_dicts = [_table_dict(table) for table in tables]
-    profile_dicts = [_profile_dict(profile) for profile in profiles]
+    profile_dicts = [_profile_dict(profile) for profile in profile_rows]
     relation_dicts = [
         {
             "left_table_id": row.left_table_id,
@@ -84,7 +116,7 @@ def graph(db: Session) -> dict:
             "confidence": row.confidence,
             "kind": row.kind,
         }
-        for row in relations
+        for row in relation_rows
     ]
     classified = classify_tables(table_dicts, profile_dicts, relation_dicts)
     role_by_id = {item["table_id"]: item["role"] for item in classified}
@@ -103,7 +135,7 @@ def graph(db: Session) -> dict:
             }
         )
     edges = []
-    for row, edge in zip(relations, relation_dicts):
+    for row, edge in zip(relation_rows, relation_dicts):
         left = next((node for node in nodes if node["id"] == row.left_table_id), None)
         right = next((node for node in nodes if node["id"] == row.right_table_id), None)
         edges.append(
@@ -125,11 +157,16 @@ def graph(db: Session) -> dict:
         "fact_total": sum(1 for node in nodes if node["role"] == ROLE_FACT),
         "dim_total": sum(1 for node in nodes if node["role"] == ROLE_DIM),
         "unrelated_total": sum(1 for node in nodes if node["role"] not in (ROLE_FACT, ROLE_DIM)),
+        "version_id": version.id if version else None,
+        "version_no": version.version_no if version else None,
+        "version_status": version.status if version else None,
     }
 
 
 def table_profiles(db: Session, table_id: int) -> dict:
-    rows = db.scalars(
-        select(ColumnProfile).where(ColumnProfile.table_id == table_id).order_by(ColumnProfile.id)
-    ).all()
+    version = _scope_version(db, None)
+    stmt = select(ColumnProfile).where(ColumnProfile.table_id == table_id)
+    if version is not None:
+        stmt = stmt.where(ColumnProfile.version_id == version.id)
+    rows = db.scalars(stmt.order_by(ColumnProfile.id)).all()
     return {"items": [serialize_profile(row) for row in rows], "total": len(rows)}

@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Iterable, Sequence
+from typing import Sequence
 
 from src.services.profiling_service import normalize, preferred_key
 
@@ -292,6 +292,19 @@ def build_suggestions(
                     dim_targets,
                 ),
                 "reason": f"识别到 {len(fk_columns)} 个维度外键，{len([c for c in columns if is_measure(c['column'])])} 个度量列，按外键组合去重得到粒度。",
+                "evidence": {
+                    "outgoing_edges": len(outgoing),
+                    "grain_columns": fk_columns,
+                    "grain_combos": combos,
+                    "sampled_rows": sampled,
+                    "measure_columns": [profile["column"] for profile in columns if is_measure(profile["column"])],
+                    "avg_containment": round(avg_containment, 4),
+                    "edge_containments": {
+                        column: relation_by_column[column]["containment"] for column in fk_columns
+                    },
+                    "fact_score": next(item["fact_score"] for item in classified if item["table_id"] == table["id"]),
+                    "row_count": int(table.get("row_count") or 0),
+                },
             }
         )
 
@@ -336,6 +349,14 @@ def build_suggestions(
                     dim_targets,
                 ),
                 "reason": f"存在候选键 {pk} 与 {len(classified_item['descriptive'])} 个描述列，被 {len(incoming_from_facts)} 张事实表直接引用，判定为维度表。",
+                "evidence": {
+                    "candidate_key": pk,
+                    "descriptive_columns": classified_item["descriptive"],
+                    "incoming_fact_edges": len(incoming_from_facts),
+                    "outgoing_edges": len(outgoing),
+                    "dim_score": classified_item["dim_score"],
+                    "row_count": int(table.get("row_count") or 0),
+                },
             }
         )
 

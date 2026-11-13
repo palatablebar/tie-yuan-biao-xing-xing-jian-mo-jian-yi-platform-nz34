@@ -1,8 +1,8 @@
 import { api } from '../api.js';
-import { ENUMS, can } from '../config.js';
+import { ENUMS, can, versionTone } from '../config.js';
 import { confidenceBar, drawer, errorBox, errorMessage, esc, field, fmtRatio, kv, table, toast } from '../ui.js';
 
-const state = { kind: '' };
+const state = { kind: '', scope: '' };
 const NODE_W = 148;
 const NODE_H = 46;
 const VIEW = { w: 980, h: 470 };
@@ -132,8 +132,8 @@ export const relationsPage = {
     let list;
     try {
       [data, list] = await Promise.all([
-        api.get('/api/relations/graph'),
-        api.get('/api/relations', { kind: state.kind, limit: 60 }),
+        api.get('/api/relations/graph', { scope: state.scope || undefined }),
+        api.get('/api/relations', { kind: state.kind, scope: state.scope || undefined, limit: 60 }),
       ]);
     } catch (err) {
       view.innerHTML = errorBox(errorMessage(err));
@@ -150,8 +150,13 @@ export const relationsPage = {
       <section class="panel">
         <div class="panel-head">
           <h2>关系图</h2>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <span class="meta" data-testid="graph-edge-count">${data.edge_total} 条边 · ${groups.facts.length} 事实 / ${groups.primary.length} 主维 / ${groups.secondary.length} 二级维</span>
+            <span class="badge ${versionTone(data.version_status || '')}">${esc(ENUMS.versionStatus[data.version_status] || '—')} · ${esc(data.version_no || '—')}</span>
+            <select id="scope-select" class="scope-select">
+              <option value="" ${!state.scope ? 'selected' : ''}>正式版口径</option>
+              <option value="draft" ${state.scope === 'draft' ? 'selected' : ''}>草案预览（未发布）</option>
+            </select>
             ${can(ctx.user.role, 'export:read') ? '<button class="btn sm ghost" id="export-relations">导出关系 CSV</button>' : ''}
           </div>
         </div>
@@ -160,7 +165,7 @@ export const relationsPage = {
           <span><i class="fact"></i>事实表（铜色）</span>
           <span><i></i>主外键（包含度 100%）</span>
           <span><i class="fk"></i>弱外键候选</span>
-          <span class="muted">点击节点高亮它的边；8 张无主键流水表未入图</span>
+          <span class="muted">点击节点高亮它的边；无主键流水表未入图</span>
         </div>
       </section>
       <section class="panel">
@@ -195,6 +200,10 @@ export const relationsPage = {
       </section>`;
 
     bindFocus(view.querySelector('#graph-board'));
+    view.querySelector('#scope-select')?.addEventListener('change', (event) => {
+      state.scope = event.target.value;
+      relationsPage.render(view, ctx);
+    });
     const filters = view.querySelector('#relation-filters');
     filters?.addEventListener('change', () => {
       state.kind = filters.querySelector('[name=kind]').value;

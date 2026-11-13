@@ -6,6 +6,7 @@ import loginPage from './pages/login.js';
 import overviewPage from './pages/overview.js';
 import tablesPage from './pages/tables.js';
 import relationsPage from './pages/relations.js';
+import versionsPage from './pages/versions.js';
 import suggestionsPage from './pages/suggestions.js';
 import auditPage from './pages/audit.js';
 
@@ -13,6 +14,7 @@ const routes = [
   { path: '#/overview', page: overviewPage, permission: 'overview:read' },
   { path: '#/tables', page: tablesPage, permission: 'table:read' },
   { path: '#/relations', page: relationsPage, permission: 'relation:read' },
+  { path: '#/versions', page: versionsPage, permission: 'version:read' },
   { path: '#/suggestions', page: suggestionsPage, permission: 'suggestion:read' },
   { path: '#/audit', page: auditPage, permission: 'audit:read' },
 ];

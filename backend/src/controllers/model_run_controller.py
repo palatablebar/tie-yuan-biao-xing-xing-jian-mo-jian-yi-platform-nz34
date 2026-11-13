@@ -1,4 +1,7 @@
-"""运行控制器：剖析 + 关系发现 + 建议生成，写领域审计。"""
+"""运行控制器：剖析产出分析版本（草案），写领域审计。
+
+手动 / 定时运行只生成草案；草案通过关系与粒度核对后，由管理员在版本模块发布为正式版。
+"""
 from __future__ import annotations
 
 from fastapi import Request
@@ -28,7 +31,12 @@ def create_run(db: Session, payload: dict, principal: dict, request: Request) ->
         action="run.create",
         entity="model_run",
         entity_id=run.id,
-        detail={"run_no": run.run_no, "relations": run.relation_count, "suggestions": run.suggestion_count},
+        detail={
+            "run_no": run.run_no,
+            "version_id": run.version_id,
+            "relations": run.relation_count,
+            "suggestions": run.suggestion_count,
+        },
         ip=request.client.host if request.client else None,
     )
     audit_service.record(
@@ -38,7 +46,12 @@ def create_run(db: Session, payload: dict, principal: dict, request: Request) ->
         action="run.complete",
         entity="model_run",
         entity_id=run.id,
-        detail={"status": run.status, "tables": run.table_count, "profiles": run.profile_count},
+        detail={
+            "status": run.status,
+            "tables": run.table_count,
+            "profiles": run.profile_count,
+            "version_id": run.version_id,
+        },
         ip=request.client.host if request.client else None,
     )
     db.commit()

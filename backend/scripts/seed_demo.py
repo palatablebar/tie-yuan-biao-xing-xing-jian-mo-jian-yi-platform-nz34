@@ -1,10 +1,11 @@
-"""幂等 seed：3 账号 / 24 张贴源表 / 1 次剖析运行 / 9 条建模建议。
+"""幂等 seed：3 账号 / 24 张贴源表 / 1 次剖析运行 / 1 个正式版 / 9 条建模建议。
 
 自然键 upsert：
   users.email
   source_tables.name
   model_runs.seed_key
-  suggestions(run_id, table_id) —— 只在首次运行生成，重复执行不覆盖采纳状态
+  analysis_versions.input_fingerprint（输入不变重跑复用草案，不新增建议）
+  suggestion_decisions（只追加，按 table_id 跟随业务对象迁移）
   audit_logs.seed_key
 
 SEED_SUMMARY 行逐字稳定；连跑两次完全一致。
@@ -14,6 +15,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 
 from src.config.database import session_scope
+from src.models.analysis_version import AnalysisVersion
 from src.models.audit import AuditLog
 from src.models.model_run import ModelRun
 from src.models.model_suggestion import ModelSuggestion
@@ -70,11 +72,14 @@ def ensure_tables(db) -> int:
 
 def ensure_runs(db) -> int:
     for seed_key, trigger, operator in SEED_RUNS:
+        # 初始 seed 直接发布为正式版，保证关系图 / 建议 / DDL 开箱即用；
+        # seed_key 命中既有运行时直接返回，不会重复建版本
         model_run_service.create_and_execute(
             db,
             trigger=trigger,
             operator_email=operator,
             seed_key=seed_key,
+            auto_publish=True,
         )
     return db.scalar(select(func.count()).select_from(ModelRun)) or 0
 
@@ -107,9 +112,20 @@ def seed_all() -> dict:
         tables = ensure_tables(db)
         runs = ensure_runs(db)
         ensure_audit(db)
-        suggestions = db.scalar(select(func.count()).select_from(ModelSuggestion)) or 0
+        published = db.scalar(
+            select(AnalysisVersion).where(AnalysisVersion.status == "published").order_by(AnalysisVersion.id.desc())
+        )
+        version_scope = [ModelSuggestion.version_id == published.id] if published else []
+        suggestions = (
+            db.scalar(select(func.count()).select_from(ModelSuggestion).where(*version_scope)) or 0
+        )
         pending = (
-            db.scalar(select(func.count()).select_from(ModelSuggestion).where(ModelSuggestion.status == "pending")) or 0
+            db.scalar(
+                select(func.count())
+                .select_from(ModelSuggestion)
+                .where(*version_scope, ModelSuggestion.status == "pending")
+            )
+            or 0
         )
         summary = (
             f"SEED_SUMMARY brand=starmodel users={users} sources={tables} "

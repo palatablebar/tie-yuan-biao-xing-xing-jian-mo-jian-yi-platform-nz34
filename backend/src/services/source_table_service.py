@@ -9,7 +9,6 @@ from src.models.column_profile import ColumnProfile
 from src.models.source_table import SourceTable
 from src.utils.errors import AppError, not_found
 from src.utils.timeutil import iso_utc
-from src.services.profiling_service import profile_table
 
 
 def serialize(table: SourceTable, profile_count: int | None = None) -> dict:
@@ -101,31 +100,18 @@ def create_table(db: Session, payload: dict) -> SourceTable:
     if existing is not None:
         raise AppError("CONFLICT", 409, {"name": payload["name"]})
     sample_rows = payload.get("sample_rows") or []
-    profiles = profile_table(sample_rows) if sample_rows else []
+    # 字段数按抽样首行推断；逐列剖析结果归属分析版本，由下一次「执行剖析」生成
+    field_count = len(sample_rows[0]) if sample_rows else 0
     table = SourceTable(
         name=payload["name"],
         cn_name=payload.get("cn_name") or payload["name"],
         subject=payload.get("subject") or payload["name"],
         domain=payload.get("domain") or "sales",
         row_count=int(payload.get("row_count") or len(sample_rows)),
-        field_count=len(profiles),
+        field_count=field_count,
         sample_rows=sample_rows,
         note=payload.get("note"),
     )
     db.add(table)
-    db.flush()
-    for profile in profiles:
-        db.add(
-            ColumnProfile(
-                table_id=table.id,
-                column=profile["column"],
-                dtype=profile["dtype"],
-                unique_ratio=profile["unique_ratio"],
-                null_ratio=profile["null_ratio"],
-                cardinality=profile["cardinality"],
-                sample_values=profile["sample_values"],
-                sample_size=profile["sample_size"],
-            )
-        )
     db.flush()
     return table

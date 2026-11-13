@@ -121,14 +121,58 @@ MODEL_RUN_STATUS_LABELS: dict[str, str] = {
 }
 
 
+class AnalysisVersionStatus(StrEnum):
+    """分析版本生命周期：draft 草案（可核对/可比较）→ published 正式版 / validation_failed 核对未过；
+    新正式版发布后，旧正式版置 superseded（留档可回溯，数据不删）。"""
+
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    SUPERSEDED = "superseded"
+    VALIDATION_FAILED = "validation_failed"
+
+
+ANALYSIS_VERSION_STATUS_LABELS: dict[str, str] = {
+    AnalysisVersionStatus.DRAFT.value: "草案",
+    AnalysisVersionStatus.PUBLISHED.value: "正式版",
+    AnalysisVersionStatus.SUPERSEDED.value: "历史正式版",
+    AnalysisVersionStatus.VALIDATION_FAILED.value: "核对未过",
+}
+
+ANALYSIS_VERSION_STATUS_ORDER: list[str] = [
+    AnalysisVersionStatus.DRAFT.value,
+    AnalysisVersionStatus.PUBLISHED.value,
+    AnalysisVersionStatus.SUPERSEDED.value,
+    AnalysisVersionStatus.VALIDATION_FAILED.value,
+]
+
+
+class SuggestionChangeKind(StrEnum):
+    """草案相对上一正式版的建议差异类型。"""
+
+    ADDED = "added"
+    CHANGED = "changed"
+    REMOVED = "removed"
+    UNCHANGED = "unchanged"
+
+
+SUGGESTION_CHANGE_LABELS: dict[str, str] = {
+    SuggestionChangeKind.ADDED.value: "新增",
+    SuggestionChangeKind.CHANGED.value: "变更",
+    SuggestionChangeKind.REMOVED.value: "移除",
+    SuggestionChangeKind.UNCHANGED.value: "无变化",
+}
+
+
 class TriggerKind(StrEnum):
     MANUAL = "manual"
     SCHEDULE = "schedule"
     SEED = "seed"
+    INCREMENTAL = "incremental"
 
 
 TRIGGER_LABELS: dict[str, str] = {
     TriggerKind.MANUAL.value: "手动",
     TriggerKind.SCHEDULE.value: "定时",
     TriggerKind.SEED.value: "初始化",
+    TriggerKind.INCREMENTAL.value: "补数增量",
 }

@@ -14,15 +14,22 @@ router = APIRouter(prefix="/relations", tags=["relations"])
 @router.get("")
 def list_relations(
     kind: str | None = None,
+    scope: str | None = None,
     limit: int = Query(60),
     offset: int = Query(0),
     db: Session = Depends(get_db),
     principal: dict = Depends(require_roles(*READ_ROLES)),
 ) -> dict:
     page = page_params(limit, offset)
-    return relation_controller.list_relations(db, kind=kind, limit=page.limit, offset=page.offset)
+    return relation_controller.list_relations(
+        db, kind=kind, scope=scope, limit=page.limit, offset=page.offset
+    )
 
 
 @router.get("/graph")
-def graph(db: Session = Depends(get_db), principal: dict = Depends(require_roles(*READ_ROLES))) -> dict:
-    return relation_controller.graph(db)
+def graph(
+    scope: str | None = None,
+    db: Session = Depends(get_db),
+    principal: dict = Depends(require_roles(*READ_ROLES)),
+) -> dict:
+    return relation_controller.graph(db, scope=scope)

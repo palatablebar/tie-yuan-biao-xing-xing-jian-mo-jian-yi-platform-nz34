@@ -1,4 +1,8 @@
-"""总览：表数 / 关系数 / 建议数、分布、最近运行、worker 心跳。"""
+"""总览：表数 / 关系数 / 建议数、分布、最近运行、worker 心跳。
+
+建议与关系计数锚定「当前正式版」分析版本；草案计数单独给出，
+确保页面默认口径与关系图、DDL 导出完全一致。
+"""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -22,8 +26,9 @@ from src.models.model_run import ModelRun
 from src.models.model_suggestion import ModelSuggestion
 from src.models.relation import Relation
 from src.models.source_table import SourceTable
+from src.services import analysis_version_service as version_service
 from src.services.model_run_service import serialize as serialize_run
-from src.utils.timeutil import local_now, utcnow
+from src.utils.timeutil import utcnow, local_now
 
 
 def worker_alive() -> bool:
@@ -46,11 +51,23 @@ def _ordered(rows, order, labels) -> list[dict]:
 
 def overview(db: Session) -> dict:
     tables_total = db.scalar(select(func.count()).select_from(SourceTable)) or 0
-    profiles_total = db.scalar(select(func.count()).select_from(ColumnProfile)) or 0
-    relations_total = db.scalar(select(func.count()).select_from(Relation)) or 0
     latest_run = db.scalar(select(ModelRun).order_by(ModelRun.id.desc()).limit(1))
-    # 建议计数聚焦最新一次剖析（历史运行的建议留档，不混入当前模型口径）
-    scope = [ModelSuggestion.run_id == latest_run.id] if latest_run else []
+
+    published = version_service.current_published(db)
+    draft = version_service.current_draft(db)
+    # 口径版本：优先正式版；尚未发布时回退草案（首启空窗）
+    scope_version = published or draft
+    scope = [ModelSuggestion.version_id == scope_version.id] if scope_version else []
+    relation_scope = [Relation.version_id == scope_version.id] if scope_version else []
+
+    profiles_total = (
+        db.scalar(select(func.count()).select_from(ColumnProfile).where(ColumnProfile.version_id == scope_version.id))
+        if scope_version
+        else 0
+    )
+    relations_total = (
+        db.scalar(select(func.count()).select_from(Relation).where(*relation_scope)) or 0
+    )
     suggestions_total = db.scalar(select(func.count()).select_from(ModelSuggestion).where(*scope)) or 0
     pending_total = (
         db.scalar(
@@ -68,7 +85,11 @@ def overview(db: Session) -> dict:
     domain_rows = db.execute(
         select(SourceTable.domain, func.count()).group_by(SourceTable.domain)
     ).all()
-    kind_rows = db.execute(select(Relation.kind, func.count()).group_by(Relation.kind)).all()
+    kind_rows = (
+        db.execute(select(Relation.kind, func.count()).where(*relation_scope).group_by(Relation.kind)).all()
+        if scope_version
+        else []
+    )
     role_rows = db.execute(
         select(ModelSuggestion.role, func.count()).where(*scope).group_by(ModelSuggestion.role)
     ).all()
@@ -90,10 +111,10 @@ def overview(db: Session) -> dict:
         )
         trend.append({"date": day.isoformat(), "runs": count})
 
-    metrics = (latest_run.metrics or {}) if latest_run else {}
+    metrics = (scope_version.metrics or {}) if scope_version else {}
     return {
         "tables_total": tables_total,
-        "profiles_total": profiles_total,
+        "profiles_total": profiles_total or 0,
         "relations_total": relations_total,
         "suggestions_total": suggestions_total,
         "pending_total": pending_total,
@@ -104,6 +125,8 @@ def overview(db: Session) -> dict:
         "unrelated_total": int(metrics.get("unrelated_tables") or 0),
         "worker_alive": worker_alive(),
         "latest_run": serialize_run(latest_run) if latest_run else None,
+        "scope_version": version_service.serialize(scope_version) if scope_version else None,
+        "draft_version": version_service.serialize(draft) if draft else None,
         "domains": _ordered(domain_rows, TABLE_DOMAIN_ORDER, TABLE_DOMAIN_LABELS),
         "relation_kinds": _ordered(kind_rows, RELATION_KIND_ORDER, RELATION_KIND_LABELS),
         "roles": _ordered(role_rows, SUGGESTION_ROLE_ORDER, SUGGESTION_ROLE_LABELS),

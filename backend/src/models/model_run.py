@@ -1,4 +1,8 @@
-"""一次剖析 + 关系发现 + 星型建模建议运行。"""
+"""一次剖析 + 关系发现 + 星型建模建议运行。
+
+运行负责执行计算，产物挂到 analysis_versions（草案）上；
+run 本身保留执行台账（触发人、计数、日志、seed 幂等键）。
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -22,6 +26,8 @@ class ModelRun(Base):
     profile_count: Mapped[int] = mapped_column(Integer, default=0)
     relation_count: Mapped[int] = mapped_column(Integer, default=0)
     suggestion_count: Mapped[int] = mapped_column(Integer, default=0)
+    # 本次运行产出的分析版本（草案）；失败运行可能为空
+    version_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     log_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     seed_key: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)

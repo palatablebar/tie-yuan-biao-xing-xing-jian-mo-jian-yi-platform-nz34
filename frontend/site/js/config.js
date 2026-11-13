@@ -20,8 +20,9 @@ export const NAV = [
   { to: '#/overview', no: '00', label: '制图台总览', permission: 'overview:read' },
   { to: '#/tables', no: '01', label: '贴源表与剖析', permission: 'table:read' },
   { to: '#/relations', no: '02', label: '关系图', permission: 'relation:read' },
-  { to: '#/suggestions', no: '03', label: '建模建议', permission: 'suggestion:read' },
-  { to: '#/audit', no: '04', label: '审计日志', permission: 'audit:read' },
+  { to: '#/versions', no: '03', label: '分析版本', permission: 'version:read' },
+  { to: '#/suggestions', no: '04', label: '建模建议', permission: 'suggestion:read' },
+  { to: '#/audit', no: '05', label: '审计日志', permission: 'audit:read' },
 ];
 
 export const ROLE_LABELS = {
@@ -34,13 +35,14 @@ export const PERMISSIONS = {
   admin: [
     'overview:read', 'table:read', 'table:write', 'profile:read', 'relation:read',
     'run:read', 'run:create', 'suggestion:read', 'suggestion:adopt', 'suggestion:review',
-    'export:read', 'audit:read',
+    'version:read', 'version:release', 'export:read', 'audit:read',
   ],
   analyst: [
     'overview:read', 'table:read', 'profile:read', 'relation:read',
-    'run:read', 'run:create', 'suggestion:read', 'suggestion:review', 'export:read',
+    'run:read', 'run:create', 'suggestion:read', 'suggestion:review',
+    'version:read', 'export:read',
   ],
-  viewer: ['overview:read', 'table:read', 'profile:read', 'relation:read', 'run:read', 'suggestion:read'],
+  viewer: ['overview:read', 'table:read', 'profile:read', 'relation:read', 'run:read', 'suggestion:read', 'version:read'],
 };
 
 export const ENUMS = {
@@ -60,7 +62,9 @@ export const ENUMS = {
   suggestionRole: { fact: '事实表', dim: '维度表' },
   suggestionStatus: { pending: '待采纳', adopted: '已采纳', dismissed: '已驳回' },
   runStatus: { queued: '排队中', running: '剖析中', success: '成功', partial: '部分成功', failed: '失败' },
-  trigger: { manual: '手动', schedule: '定时', seed: '初始化' },
+  trigger: { manual: '手动', schedule: '定时', seed: '初始化', incremental: '补数增量' },
+  versionStatus: { draft: '草案', published: '正式版', superseded: '历史正式版', validation_failed: '核对未过' },
+  changeKind: { added: '新增', changed: '变更', removed: '移除', unchanged: '无变化' },
 };
 
 export function can(role, permission) {
@@ -73,6 +77,19 @@ export function roleTone(role) {
 
 export function statusTone(status) {
   return { pending: 'pending warn', adopted: 'adopted ok', dismissed: 'dismissed danger' }[status] || 'info';
+}
+
+export function versionTone(status) {
+  return {
+    draft: 'warn',
+    published: 'ok',
+    superseded: 'info',
+    validation_failed: 'danger',
+  }[status] || 'info';
+}
+
+export function changeTone(kind) {
+  return { added: 'ok', changed: 'warn', removed: 'danger', unchanged: 'info' }[kind] || 'info';
 }
 
 export function runTone(status) {

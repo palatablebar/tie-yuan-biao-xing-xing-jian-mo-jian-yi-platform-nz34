@@ -1,6 +1,7 @@
 """路由聚合：统一 /api 前缀（Nginx 反代时剥掉 /api）。"""
 from fastapi import APIRouter
 
+from src.routes.analysis_versions import router as analysis_versions_router
 from src.routes.audit import router as audit_router
 from src.routes.auth import router as auth_router
 from src.routes.exports import router as exports_router
@@ -20,6 +21,7 @@ api_router.include_router(source_tables_router)
 api_router.include_router(profiles_router)
 api_router.include_router(relations_router)
 api_router.include_router(model_runs_router)
+api_router.include_router(analysis_versions_router)
 api_router.include_router(model_suggestions_router)
 api_router.include_router(exports_router)
 api_router.include_router(audit_router)

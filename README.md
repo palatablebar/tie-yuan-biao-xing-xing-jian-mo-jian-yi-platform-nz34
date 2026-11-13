@@ -25,11 +25,29 @@
 
 ## 3. 功能模块（串成一条链路）
 
-1. **贴源表与剖析**（`#/tables`）：24 张表按主题域筛选；抽屉里逐列看唯一率、空值率、基数与样本值（服务端剖析结果）。
-2. **关系图**（`#/relations`）：SVG 主视觉，18 条边按「二级维 → 主维 → 事实」三带排布；点击节点高亮它的边；下方包含依赖清单可看包含度/置信度。
-3. **建模建议**（`#/suggestions`）：9 条建议（4 事实 + 5 主维），含粒度、关联边、置信度、DDL；管理员采纳、专员驳回，状态落库且不被重跑覆盖。
-4. **总览**（`#/overview`）：表/字段/关系/建议计数、关系类型与建议状态分布、最近一次剖析指标与日志、7 日趋势。
-5. **导出与审计**：管理员导出 `ddl.sql`（9 段）、专员导出关系 CSV；登录/登记/剖析/采纳/驳回/导出全部进 `audit_logs`。
+1. **贴源表与剖析**（`#/tables`）：24 张表按主题域筛选；抽屉里逐列看唯一率、空值率、基数与样本值（剖析结果按分析版本快照保存）。
+2. **关系图**（`#/relations`）：SVG 主视觉，边按「二级维 → 主维 → 事实」三带排布；默认锁定当前**正式版**口径，可切换「草案预览」查看未发布版本；点击节点高亮它的边。
+3. **分析版本**（`#/versions`）：每次剖析产出一个**草案**（draft），与正式版快照隔离；页面可查看建议/关系**差异**、关系与粒度**核对结果**与每条建议的**本版依据**。核对通过后由管理员**一次性发布**（单事务切换，失败回滚上一版）；支持「补数增量剖析」，只重算受影响业务对象。
+4. **建模建议**（`#/suggestions`）：默认展示正式版建议，含粒度、关联边、置信度、差异徽标、量化依据与 DDL；人工采纳/驳回只允许作用在草案上，决定按业务对象（贴源表）迁移，重跑、补数、发布都不会重置或删除。
+5. **总览**（`#/overview`）：表/字段/关系/建议计数（锚定正式版）、分布、最近运行、待核对草案横幅、7 日趋势。
+6. **导出与审计**：管理员导出的 `ddl.sql` 与关系 CSV **只含正式版快照**，不会混入草案或上一版关系；剖析、增量、采纳/驳回、发布、重核对、导出全部进 `audit_logs`。
+
+### 分析版本生命周期（核心机制）
+
+```text
+剖析/补数 → analysis_versions(draft 草案)
+                 │  关系与粒度核对（validation_service，6 项硬校验）
+                 ├─ 未通过 → validation_failed（可「重新核对」，不影响正式版）
+                 └─ 通过   → 管理员发布（单事务）
+                              ├─ 当前正式版 → superseded（留档不删）
+                              └─ 草案 → published（建议/关系图/DDL 一次性切换）
+```
+
+- **快照隔离**：`column_profiles` / `relations` / `model_suggestions` 全部带 `version_id`，草案与正式版各自留档；关系图、建议列表、DDL 导出默认只读正式版。
+- **补数增量**：`POST /api/analysis-versions/incremental-run` 传 `affected_table_ids`，只重算受影响表的剖析，其余沿用上一版快照；关系在合并后的完整快照上重算。未发布草案上可链式累积，受影响集合自动并集，不丢前一次改动。
+- **决定跟随业务对象**：人工采纳/驳回写入只追加的 `suggestion_decisions`（按 `table_id`），构建新版本时迁移最近一次决定；同表建议在新草案里自动带上 `adopted/dismissed` 状态。
+- **幂等重跑**：版本记录全部贴源表（name+row_count+sample_rows）的 SHA-256 指纹；输入不变时重复剖析直接复用最新版本，不新增版本、不新增建议。
+- **失败恢复**：发布在单个数据库事务内完成（旧版置 `superseded` + 草案置 `published`），任一步失败整体回滚，上一正式版保持可用。
 
 ## 4. 快速启动
 
@@ -80,10 +98,13 @@ cd frontend/site && python -m http.server 5173   # 静态站，接口走 /api
 ```text
 backend/
   src/{config,constants,controllers,middlewares,models,routes,schemas,services,utils}
+  src/models/analysis_version.py、suggestion_decision.py   # 分析版本 + 只追加人工决定
+  src/services/analysis_version_service.py、validation_service.py  # 草案构建/差异/发布 + 关系粒度核对
   scripts/{seed_demo.py,demo_config.py,worker_healthcheck.sh}
   migrations/  tests/
 frontend/
   site/{index.html,css/{tokens,app}.css,js/{config,api,store,ui,app}.js,js/pages/*.js}
+  site/js/pages/versions.js   # 分析版本页（差异 / 核对 / 依据 / 发布 / 增量入口）
 docker-compose.yml  .env  README.md
 ```
 
@@ -109,7 +130,14 @@ docker-compose.yml  .env  README.md
 
 ### 关系图数据
 
-`GET /api/relations/graph` 返回 24 个节点（含算法现算的 fact/dim/none 角色与度数）与 18 条边；角色只由 `classify_tables()` 计算，不落库、不由前端推断。
+`GET /api/relations/graph` 返回节点（含算法现算的 fact/dim/none 角色与度数）与边；数据按 `version_id` 取当前正式版快照（`scope=draft` 取草案）。角色只由 `classify_tables()` 计算，不落库、不由前端推断。
+
+### 分析版本与核对
+
+- 版本表 `analysis_versions` 记录状态机 `draft → published / validation_failed`，发布后旧版置 `superseded`；同刻至多一个 `published`。
+- 核对服务 `validation_service.validate_version()` 含 5 类硬校验：关系右列为候选键、弱外键包含度 ≥ 0.98、事实粒度外键非空且去重组合数 ≤ 抽样行数、事实 DDL 的 FOREIGN KEY 数与关联边一致、版本内目标表名唯一。
+- 差异 `analysis_version_service.version_diff()` 以业务对象 `table_id` 对齐两个版本的建议，以边四元组对齐关系，输出 added/changed/removed/unchanged 与前后置信度/包含度对照。
+- 输入指纹 `input_fingerprint` 为全部贴源表样本的 SHA-256；算法纯确定性，指纹相同则产物相同，重复剖析直接复用版本，保证「重复执行不能新增建议」。
 
 ## 10. 共享枚举出现位置
 
@@ -121,6 +149,8 @@ docker-compose.yml  .env  README.md
 | 关系类型 `pk-fk/fk` | `backend/src/constants/enums.py`（`RelationKind`） | `frontend/site/js/config.js`（`ENUMS.relationKind`） |
 | 建议角色 `fact/dim` | `backend/src/constants/enums.py`（`SuggestionRole`） | `frontend/site/js/config.js`（`ENUMS.suggestionRole`） |
 | 建议状态 `pending/adopted/dismissed` | `backend/src/constants/enums.py`（`SuggestionStatus`） | `frontend/site/js/config.js`（`ENUMS.suggestionStatus`） |
+| 版本状态 `draft/published/superseded/validation_failed` | `backend/src/constants/enums.py`（`AnalysisVersionStatus`） | `frontend/site/js/config.js`（`ENUMS.versionStatus`） |
+| 建议差异 `added/changed/removed/unchanged` | `backend/src/constants/enums.py`（`SuggestionChangeKind`） | `frontend/site/js/config.js`（`ENUMS.changeKind`） |
 | 运行状态 `queued/running/success/partial/failed` | `backend/src/constants/enums.py`（`ModelRunStatus`） | `frontend/site/js/config.js`（`ENUMS.runStatus`） |
 
 ## 11. API
@@ -128,17 +158,21 @@ docker-compose.yml  .env  README.md
 | 方法 | 路径 | 权限 |
 |---|---|---|
 | POST | `/api/auth/login` | 公开 |
-| GET | `/api/overview` | 三角色 |
+| GET | `/api/overview` | 三角色（含 `scope_version` 正式版 / `draft_version` 草案） |
 | GET | `/api/source-tables`、`/api/source-tables/{id}` | 三角色 |
 | POST | `/api/source-tables` | admin |
-| GET | `/api/profiles?table_id=` | 三角色 |
-| GET | `/api/relations`、`/api/relations/graph` | 三角色 |
-| GET / POST | `/api/model-runs` | 读：三角色；写：admin/analyst |
-| GET | `/api/model-suggestions`、`/{id}` | 三角色 |
-| POST | `/api/model-suggestions/{id}/adopt` | admin |
-| POST | `/api/model-suggestions/{id}/dismiss` | admin/analyst |
-| GET | `/api/exports/ddl.sql` | admin |
-| GET | `/api/exports/relations.csv`、`/suggestions.csv` | admin/analyst |
+| GET | `/api/profiles?table_id=` | 三角色（正式版快照） |
+| GET | `/api/relations`、`/api/relations/graph?scope=draft` | 三角色（默认正式版，scope=draft 预览草案） |
+| GET / POST | `/api/model-runs` | 读：三角色；写：admin/analyst（POST 生成草案，不直接改正式版） |
+| GET | `/api/analysis-versions`、`/{id}`、`/{id}/diff` | 三角色 |
+| POST | `/api/analysis-versions/incremental-run` | admin/analyst（补数增量草案） |
+| POST | `/api/analysis-versions/{id}/revalidate` | admin/analyst（重新核对） |
+| POST | `/api/analysis-versions/{id}/publish` | admin（事务性发布为正式版） |
+| GET | `/api/model-suggestions?version_id=`、`/{id}` | 三角色（默认正式版） |
+| POST | `/api/model-suggestions/{id}/adopt` | admin（仅限当前草案） |
+| POST | `/api/model-suggestions/{id}/dismiss` | admin/analyst（仅限当前草案） |
+| GET | `/api/exports/ddl.sql` | admin（仅正式版） |
+| GET | `/api/exports/relations.csv`、`/suggestions.csv` | admin/analyst（仅正式版） |
 | GET | `/api/audit` | admin |
 
 ## 12. Docker 说明

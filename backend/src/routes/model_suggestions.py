@@ -14,7 +14,7 @@ router = APIRouter(prefix="/model-suggestions", tags=["model-suggestions"])
 
 @router.get("")
 def list_suggestions(
-    run_id: int | None = None,
+    version_id: int | None = None,
     role: str | None = None,
     status: str | None = None,
     q: str | None = None,
@@ -25,7 +25,7 @@ def list_suggestions(
 ) -> dict:
     page = page_params(limit, offset)
     return suggestion_controller.list_suggestions(
-        db, run_id=run_id, role=role, status=status, q=q, limit=page.limit, offset=page.offset
+        db, version_id=version_id, role=role, status=status, q=q, limit=page.limit, offset=page.offset
     )
 
 

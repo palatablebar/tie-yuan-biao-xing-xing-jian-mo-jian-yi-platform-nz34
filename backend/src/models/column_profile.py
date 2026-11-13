@@ -1,4 +1,8 @@
-"""字段剖析：每列的唯一率 / 空值率 / 基数 / 样本值。"""
+"""字段剖析：每列的唯一率 / 空值率 / 基数 / 样本值。
+
+剖析结果按分析版本快照保存：同一字段在不同版本里可以有不同口径，
+唯一约束因此带上 version_id，正式版与草案互不覆盖。
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -12,9 +16,14 @@ from src.utils.timeutil import utcnow
 
 class ColumnProfile(Base):
     __tablename__ = "column_profiles"
-    __table_args__ = (UniqueConstraint("table_id", "column_name", name="uq_profiles_table_column"),)
+    __table_args__ = (
+        UniqueConstraint("version_id", "table_id", "column_name", name="uq_profiles_version_table_column"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("analysis_versions.id", ondelete="CASCADE"), index=True
+    )
     table_id: Mapped[int] = mapped_column(ForeignKey("source_tables.id", ondelete="CASCADE"), index=True)
     column: Mapped[str] = mapped_column("column_name", String(80))
     dtype: Mapped[str] = mapped_column(String(16), default="string")
